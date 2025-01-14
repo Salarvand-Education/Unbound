@@ -8,13 +8,15 @@ HOSTNAME_DEFAULT="server"  # Set default hostname
 # Function: Set Hostname and configure /etc/hosts
 set_hostname() {
     echo "Setting up default hostname: $HOSTNAME_DEFAULT..."
-    sudo hostnamectl set-hostname "$HOSTNAME_DEFAULT"
     
-    # Ensure the /etc/hosts file has the correct entries
+    # First, add the hostname entry to /etc/hosts if not present
     if ! grep -q "$HOSTNAME_DEFAULT" /etc/hosts; then
         echo "Adding hostname entry to /etc/hosts..."
         sudo bash -c "echo '127.0.1.1    $HOSTNAME_DEFAULT' >> /etc/hosts"
     fi
+
+    # Now set the hostname
+    sudo hostnamectl set-hostname "$HOSTNAME_DEFAULT"
     
     echo "Hostname and /etc/hosts updated successfully!"
 }
