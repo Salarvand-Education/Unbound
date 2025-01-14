@@ -62,14 +62,35 @@ EOF"
 # Function: Configure DNS
 configure_dns() {
     echo "Configuring DNS to use Unbound..."
+
+    # Stop and disable systemd-resolved service
+    echo "Stopping and disabling systemd-resolved..."
     sudo systemctl stop systemd-resolved
     sudo systemctl disable systemd-resolved
-    sudo rm -f $RESOLV_PATH
+
+    # Check if /etc/resolv.conf is immutable and remove the protection
+    if lsattr $RESOLV_PATH | grep -q 'i'; then
+        echo "Removing immutable flag from $RESOLV_PATH..."
+        sudo chattr -i $RESOLV_PATH
+    fi
+
+    # Remove existing resolv.conf file
+    if [ -f "$RESOLV_PATH" ]; then
+        echo "Removing existing $RESOLV_PATH..."
+        sudo rm -f $RESOLV_PATH
+    fi
+
+    # Create a new resolv.conf file with Unbound settings
+    echo "Creating new $RESOLV_PATH..."
     sudo bash -c "cat > $RESOLV_PATH << 'EOF'
 nameserver 127.0.0.1
 nameserver ::1
 EOF"
+
+    # Set the resolv.conf file as immutable to prevent overwriting
+    echo "Setting $RESOLV_PATH as immutable to prevent overwriting..."
     sudo chattr +i $RESOLV_PATH
+
     echo "DNS configured successfully!"
 }
 
