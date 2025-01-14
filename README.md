@@ -14,15 +14,16 @@ Run the following command to install and configure Unbound:
 
 ```bash  
 bash <(curl -s https://raw.githubusercontent.com/Salarvand-Education/Unbound/main/install.sh)
+```
 
-How It Works
+### How It Works
 
-The script will:
+## The script will:
 
-1. Update your package manager and install Unbound.
-
-
-2. Set up a default configuration file for Unbound.
+# 1. Update your package manager and install Unbound.
 
 
-3. Restart the Unbound service to apply changes.
+# 2. Set up a default configuration file for Unbound.
+
+
+# 3. Restart the Unbound service to apply changes.
