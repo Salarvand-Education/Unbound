@@ -25,6 +25,29 @@ print_message() {
     echo -e "${color}${message}${NC}"
 }
 
+# Function: Ensure Main Configuration File Exists
+ensure_main_config_exists() {
+    if [ ! -f /etc/unbound/unbound.conf ]; then
+        print_message "$RED" "Main configuration file /etc/unbound/unbound.conf not found!"
+        print_message "$YELLOW" "Creating default configuration file..."
+        if [ -f /usr/share/doc/unbound/examples/unbound.conf ]; then
+            sudo cp /usr/share/doc/unbound/examples/unbound.conf /etc/unbound/unbound.conf
+            log_message "Created default unbound.conf."
+        else
+            print_message "$RED" "Default configuration file not found in /usr/share/doc/unbound/examples/."
+            log_message "Failed to create default unbound.conf."
+            exit 1
+        fi
+    fi
+
+    # Ensure the main configuration includes custom configurations
+    if ! grep -q "include: /etc/unbound/unbound.conf.d/*.conf" /etc/unbound/unbound.conf; then
+        print_message "$YELLOW" "Adding include directive for custom configurations..."
+        echo "include: /etc/unbound/unbound.conf.d/*.conf" | sudo tee -a /etc/unbound/unbound.conf > /dev/null
+        log_message "Added include directive to unbound.conf."
+    fi
+}
+
 # Function: Set Hostname and configure /etc/hosts
 set_hostname() {
     print_message "$BLUE" "Setting up default hostname: $HOSTNAME_DEFAULT..."
@@ -51,6 +74,9 @@ install_unbound() {
     print_message "$BLUE" "Installing Unbound..."
     sudo apt update || { print_message "$RED" "Failed to update package lists."; log_message "Failed to update package lists."; exit 1; }
     sudo apt install -y unbound || { print_message "$RED" "Failed to install Unbound."; log_message "Failed to install Unbound."; exit 1; }
+
+    # Ensure main configuration file exists
+    ensure_main_config_exists
 
     # Generate control keys for remote management
     sudo unbound-control-setup || { print_message "$RED" "Failed to setup unbound-control."; log_message "Failed to setup unbound-control."; exit 1; }
