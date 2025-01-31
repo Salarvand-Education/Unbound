@@ -34,9 +34,17 @@ ensure_main_config_exists() {
             sudo cp /usr/share/doc/unbound/examples/unbound.conf /etc/unbound/unbound.conf
             log_message "Created default unbound.conf."
         else
-            print_message "$RED" "Default configuration file not found in /usr/share/doc/unbound/examples/."
-            log_message "Failed to create default unbound.conf."
-            exit 1
+            print_message "$YELLOW" "Default configuration file not found in /usr/share/doc/unbound/examples/. Creating a minimal configuration..."
+            sudo bash -c "cat > /etc/unbound/unbound.conf << 'EOF'
+server:
+    interface: 127.0.0.1
+    port: 53
+    do-ip4: yes
+    do-ip6: yes
+    access-control: 127.0.0.0/8 allow
+    include: /etc/unbound/unbound.conf.d/*.conf
+EOF"
+            log_message "Created minimal unbound.conf."
         fi
     fi
 
