@@ -173,20 +173,38 @@ restart_unbound() {
 uninstall_unbound() {
     print_message "$BLUE" "Uninstalling Unbound..."
 
+    # Stop Unbound service if running
+    if systemctl is-active --quiet unbound; then
+        print_message "$YELLOW" "Stopping Unbound service..."
+        sudo systemctl stop unbound || { print_message "$RED" "Failed to stop Unbound service."; log_message "Failed to stop Unbound service."; exit 1; }
+    fi
+
     # Remove Unbound package
+    print_message "$YELLOW" "Removing Unbound package..."
     sudo apt remove -y unbound || { print_message "$RED" "Failed to uninstall Unbound."; log_message "Failed to uninstall Unbound."; exit 1; }
 
-    # Remove configuration files
+    # Remove Unbound configuration files
+    print_message "$YELLOW" "Removing Unbound configuration files..."
     sudo rm -rf /etc/unbound || { print_message "$RED" "Failed to remove Unbound configuration files."; log_message "Failed to remove Unbound configuration files."; exit 1; }
 
     # Restore resolv.conf
+    print_message "$YELLOW" "Restoring DNS settings..."
     if lsattr "$RESOLV_PATH" 2>/dev/null | grep -q 'i'; then
         sudo chattr -i "$RESOLV_PATH" || { print_message "$RED" "Failed to remove immutable flag from $RESOLV_PATH."; log_message "Failed to remove immutable flag from $RESOLV_PATH."; exit 1; }
     fi
     sudo rm -f "$RESOLV_PATH" || { print_message "$RED" "Failed to remove $RESOLV_PATH."; log_message "Failed to remove $RESOLV_PATH."; exit 1; }
 
-    print_message "$GREEN" "Unbound uninstalled successfully!"
-    log_message "Unbound uninstalled successfully."
+    # Re-enable systemd-resolved
+    print_message "$YELLOW" "Re-enabling systemd-resolved..."
+    sudo systemctl enable systemd-resolved || { print_message "$RED" "Failed to enable systemd-resolved."; log_message "Failed to enable systemd-resolved."; exit 1; }
+    sudo systemctl start systemd-resolved || { print_message "$RED" "Failed to start systemd-resolved."; log_message "Failed to start systemd-resolved."; exit 1; }
+
+    # Restore default resolv.conf
+    print_message "$YELLOW" "Restoring default resolv.conf..."
+    sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf || { print_message "$RED" "Failed to restore default resolv.conf."; log_message "Failed to restore default resolv.conf."; exit 1; }
+
+    print_message "$GREEN" "Unbound uninstalled and DNS settings restored successfully!"
+    log_message "Unbound uninstalled and DNS settings restored successfully."
 }
 
 # Function: Show Features
