@@ -1,37 +1,61 @@
 #!/bin/bash
-
-# Unbound Management Script
+# Unbound Management Script with Logging and Colored Output
 CONFIG_PATH="/etc/unbound/unbound.conf.d/custom.conf"
 RESOLV_PATH="/etc/resolv.conf"
-HOSTNAME_DEFAULT="server"  # Set default hostname
+LOG_PATH="/var/log/unbound-management.log"
+HOSTNAME_DEFAULT="server"  # Default hostname
+
+# ANSI Color Codes
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Function: Log Messages
+log_message() {
+    local message="$1"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $message" | sudo tee -a "$LOG_PATH" > /dev/null
+}
+
+# Function: Print Colored Message
+print_message() {
+    local color="$1"
+    local message="$2"
+    echo -e "${color}${message}${NC}"
+}
 
 # Function: Set Hostname and configure /etc/hosts
 set_hostname() {
-    echo "Setting up default hostname: $HOSTNAME_DEFAULT..."
-    
-    # First, add the hostname entry to /etc/hosts if not present
+    print_message "$BLUE" "Setting up default hostname: $HOSTNAME_DEFAULT..."
+
+    # Add hostname entry to /etc/hosts if not present
     if ! grep -q "$HOSTNAME_DEFAULT" /etc/hosts; then
-        echo "Adding hostname entry to /etc/hosts..."
-        sudo bash -c "echo '127.0.1.1    $HOSTNAME_DEFAULT' >> /etc/hosts"
+        print_message "$YELLOW" "Adding hostname entry to /etc/hosts..."
+        echo "127.0.1.1    $HOSTNAME_DEFAULT" | sudo tee -a /etc/hosts > /dev/null
+        log_message "Added hostname entry to /etc/hosts."
     fi
 
-    # Now set the hostname
+    # Set the hostname
     sudo hostnamectl set-hostname "$HOSTNAME_DEFAULT"
-    
-    echo "Hostname and /etc/hosts updated successfully!"
+    log_message "Hostname set to $HOSTNAME_DEFAULT."
+
+    print_message "$GREEN" "Hostname and /etc/hosts updated successfully!"
 }
 
 # Function: Install Unbound
 install_unbound() {
-    echo "Setting up hostname before installation..."
+    print_message "$BLUE" "Setting up hostname before installation..."
     set_hostname  # Set hostname during installation
 
-    echo "Installing Unbound..."
-    sudo apt update
-    sudo apt install -y unbound
-    sudo unbound-control-setup
+    print_message "$BLUE" "Installing Unbound..."
+    sudo apt update || { print_message "$RED" "Failed to update package lists."; log_message "Failed to update package lists."; exit 1; }
+    sudo apt install -y unbound || { print_message "$RED" "Failed to install Unbound."; log_message "Failed to install Unbound."; exit 1; }
 
-    echo "Creating configuration file..."
+    # Generate control keys for remote management
+    sudo unbound-control-setup || { print_message "$RED" "Failed to setup unbound-control."; log_message "Failed to setup unbound-control."; exit 1; }
+
+    print_message "$BLUE" "Creating configuration file..."
     sudo bash -c "cat > $CONFIG_PATH << 'EOF'
 server:
     cache-max-ttl: 86400
@@ -51,11 +75,9 @@ server:
     private-address: 10.0.0.0/8
     private-address: fd00::/8
     private-address: fe80::/10
-
     remote-control:
         control-enable: yes
         control-interface: 127.0.0.1
-
 forward-zone:
     name: "."
     forward-first: no
@@ -65,33 +87,40 @@ forward-zone:
     forward-addr: 2001:4860:4860::8844
 EOF"
 
-    echo "Validating configuration..."
-    sudo unbound-checkconf
-    if [ $? -eq 0 ]; then
-        echo "Configuration is valid."
+    print_message "$BLUE" "Validating configuration..."
+    if sudo unbound-checkconf; then
+        print_message "$GREEN" "Configuration is valid."
+        log_message "Unbound configuration validated successfully."
     else
-        echo "Configuration is invalid. Exiting..."
+        print_message "$RED" "Configuration is invalid. Exiting..."
+        log_message "Unbound configuration validation failed."
         exit 1
     fi
 
-    echo "Restarting Unbound service..."
-    sudo systemctl restart unbound
-    echo "Unbound installed and configured successfully!"
+    print_message "$BLUE" "Restarting Unbound service..."
+    sudo systemctl restart unbound || { print_message "$RED" "Failed to restart Unbound."; log_message "Failed to restart Unbound."; exit 1; }
+
+    print_message "$GREEN" "Unbound installed and configured successfully!"
+    log_message "Unbound installed and configured successfully."
 }
 
 # Function: Configure DNS
 configure_dns() {
-    echo "Configuring DNS to use Unbound..."
+    print_message "$BLUE" "Configuring DNS to use Unbound..."
 
     # Stop and disable systemd-resolved
-    sudo systemctl stop systemd-resolved
-    sudo systemctl disable systemd-resolved
+    if systemctl is-active --quiet systemd-resolved; then
+        sudo systemctl stop systemd-resolved || { print_message "$RED" "Failed to stop systemd-resolved."; log_message "Failed to stop systemd-resolved."; exit 1; }
+        sudo systemctl disable systemd-resolved || { print_message "$RED" "Failed to disable systemd-resolved."; log_message "Failed to disable systemd-resolved."; exit 1; }
+    fi
 
     # Remove immutable flag if set
-    sudo chattr -i $RESOLV_PATH
+    if lsattr "$RESOLV_PATH" 2>/dev/null | grep -q 'i'; then
+        sudo chattr -i "$RESOLV_PATH" || { print_message "$RED" "Failed to remove immutable flag from $RESOLV_PATH."; log_message "Failed to remove immutable flag from $RESOLV_PATH."; exit 1; }
+    fi
 
     # Remove existing resolv.conf
-    sudo rm -f $RESOLV_PATH
+    sudo rm -f "$RESOLV_PATH" || { print_message "$RED" "Failed to remove $RESOLV_PATH."; log_message "Failed to remove $RESOLV_PATH."; exit 1; }
 
     # Create new resolv.conf for Unbound
     sudo bash -c "cat > $RESOLV_PATH << 'EOF'
@@ -100,48 +129,60 @@ nameserver ::1
 EOF"
 
     # Set resolv.conf as immutable
-    sudo chattr +i $RESOLV_PATH
+    sudo chattr +i "$RESOLV_PATH" || { print_message "$RED" "Failed to set immutable flag on $RESOLV_PATH."; log_message "Failed to set immutable flag on $RESOLV_PATH."; exit 1; }
 
-    echo "DNS configured successfully!"
+    print_message "$GREEN" "DNS configured successfully!"
+    log_message "DNS configured to use Unbound."
 }
 
 # Function: Restart Unbound
 restart_unbound() {
-    echo "Restarting Unbound service..."
-    sudo systemctl restart unbound
-    echo "Unbound service restarted."
+    print_message "$BLUE" "Restarting Unbound service..."
+    sudo systemctl restart unbound || { print_message "$RED" "Failed to restart Unbound."; log_message "Failed to restart Unbound."; exit 1; }
+    print_message "$GREEN" "Unbound service restarted."
+    log_message "Unbound service restarted."
 }
 
 # Function: Uninstall Unbound
 uninstall_unbound() {
-    echo "Uninstalling Unbound..."
-    sudo apt remove -y unbound
-    sudo rm -rf /etc/unbound
-    sudo chattr -i $RESOLV_PATH
-    sudo rm -f $RESOLV_PATH
-    echo "Unbound uninstalled successfully!"
+    print_message "$BLUE" "Uninstalling Unbound..."
+
+    # Remove Unbound package
+    sudo apt remove -y unbound || { print_message "$RED" "Failed to uninstall Unbound."; log_message "Failed to uninstall Unbound."; exit 1; }
+
+    # Remove configuration files
+    sudo rm -rf /etc/unbound || { print_message "$RED" "Failed to remove Unbound configuration files."; log_message "Failed to remove Unbound configuration files."; exit 1; }
+
+    # Restore resolv.conf
+    if lsattr "$RESOLV_PATH" 2>/dev/null | grep -q 'i'; then
+        sudo chattr -i "$RESOLV_PATH" || { print_message "$RED" "Failed to remove immutable flag from $RESOLV_PATH."; log_message "Failed to remove immutable flag from $RESOLV_PATH."; exit 1; }
+    fi
+    sudo rm -f "$RESOLV_PATH" || { print_message "$RED" "Failed to remove $RESOLV_PATH."; log_message "Failed to remove $RESOLV_PATH."; exit 1; }
+
+    print_message "$GREEN" "Unbound uninstalled successfully!"
+    log_message "Unbound uninstalled successfully."
 }
 
 # Function: Show Features
 show_features() {
-    echo "Unbound Features and Useful Commands:"
-    echo "- Local DNS resolver with caching."
-    echo "- Reduces latency and increases security."
-    echo "- Example commands:"
-    echo "  Flush a domain cache: sudo unbound-control flush <domain>"
-    echo "  Lookup cache: sudo unbound-control lookup <domain>"
-    echo "  Test local DNS: dig @127.0.0.1 google.com"
+    print_message "$BLUE" "Unbound Features and Useful Commands:"
+    print_message "$YELLOW" "- Local DNS resolver with caching."
+    print_message "$YELLOW" "- Reduces latency and increases security."
+    print_message "$YELLOW" "- Example commands:"
+    print_message "$YELLOW" "  Flush a domain cache: sudo unbound-control flush <domain>"
+    print_message "$YELLOW" "  Lookup cache: sudo unbound-control lookup <domain>"
+    print_message "$YELLOW" "  Test local DNS: dig @127.0.0.1 google.com"
 }
 
 # Main Menu
 while true; do
-    echo "Choose an option:"
-    echo "1) Install Unbound"
-    echo "2) Configure DNS"
-    echo "3) Restart Unbound"
-    echo "4) Uninstall Unbound"
-    echo "5) Show Features"
-    echo "6) Exit"
+    print_message "$BLUE" "Choose an option:"
+    print_message "$YELLOW" "1) Install Unbound"
+    print_message "$YELLOW" "2) Configure DNS"
+    print_message "$YELLOW" "3) Restart Unbound"
+    print_message "$YELLOW" "4) Uninstall Unbound"
+    print_message "$YELLOW" "5) Show Features"
+    print_message "$YELLOW" "6) Exit"
     read -rp "Enter your choice [1-6]: " choice
 
     case $choice in
@@ -150,7 +191,7 @@ while true; do
         3) restart_unbound ;;
         4) uninstall_unbound ;;
         5) show_features ;;
-        6) echo "Exiting..."; exit 0 ;;
-        *) echo "Invalid choice, please try again." ;;
+        6) print_message "$BLUE" "Exiting..."; log_message "Script exited by user."; exit 0 ;;
+        *) print_message "$RED" "Invalid choice, please try again." ;;
     esac
 done
